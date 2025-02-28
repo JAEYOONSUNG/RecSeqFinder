@@ -33,6 +33,7 @@ This Python script analyzes SnapGene `.dna` files to count occurrences of restri
 
 6. **Customization**:
    - Easily extensible `default_restriction_enzymes` dictionary for adding new restriction enzymes.
+   - The current data includes enzymes from the REBASE gold_standard sequences as defaults.
    - Modular design allows adaptation for other sequence analysis tasks.
 
 ## Usage
