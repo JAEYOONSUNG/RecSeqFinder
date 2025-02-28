@@ -45,3 +45,21 @@ This Python script analyzes SnapGene `.dna` files to count occurrences of restri
    Install dependencies:
    ```bash
    pip install pandas biopython snapgene_reader xlsxwriter
+   ```
+2.
+   ```bash
+   python RecSeqFinder.py
+   ```
+The script prompts for two inputs:
+
+```bash
+Enter RM recognition sequences (comma-separated, e.g., GATC, EcoRI): GATC
+# Enzyme name or IUPAC sequence.
+```
+
+```bash
+Enter the working directory path: /path/to/dna/files
+# Directory path containing .dna files.
+```
+
+Outputs result.xlsx in the specified directory.
