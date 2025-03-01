@@ -1,5 +1,4 @@
-# RecSeqFinder
-# Restriction Enzyme Sequence Finder
+#RecSeqFinder
 
 This Python script analyzes SnapGene `.dna` files to count occurrences of restriction enzyme recognition sequences and generates an Excel output with detailed results. It supports both raw sequence inputs (e.g., `GATC`) and restriction enzyme names (e.g., `EcoRI`), providing flexibility and robust error handling.
 
