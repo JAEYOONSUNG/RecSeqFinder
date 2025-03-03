@@ -587,38 +587,83 @@ default_restriction_enzymes = {
 "YkrI": "C"
 }
 
-# Restriction enzyme dictionary with case-insensitive support
+# Create case-insensitive restriction enzyme dictionary
 restriction_enzymes = {}
 for key, value in default_restriction_enzymes.items():
     restriction_enzymes[key] = value
-    restriction_enzymes[key.upper()] = value  # Add uppercase variant
+    restriction_enzymes[key.upper()] = value
 
-# Function to compare sequences
-def sequence_comparison(dna_seq, RM_seq, column_name, palindrome_count):
+def sequence_comparison(dna_seq, RM_seq, column_name, reverse_match_count, is_circular=False):
+    """Count restriction enzyme recognition sequences in DNA
+    - dna_seq: DNA sequence (Seq object)
+    - RM_seq: Recognition sequence
+    - column_name: Output column name
+    - reverse_match_count: Count of simultaneous matches in forward and reverse strands
+    - is_circular: Whether the DNA is circular
+    - Returns: forward count, reverse count, simultaneous match count, unique site count
+    """
     dna_seq_RC = dna_seq.reverse_complement()
-    identity_score = 0
-    identity_score_RC = 0
+    identity_score = 0  # Forward strand matches
+    identity_score_RC = 0  # Reverse strand matches
+    seq_len = len(dna_seq)
+    rm_len = len(RM_seq)
+    unique_positions = set()  # Track unique positions
 
-    for i in range(len(dna_seq)):
-        subject_frag = dna_seq[i:i+len(RM_seq)]
-        subject_frag_RC = dna_seq_RC[i:i+len(RM_seq)]
-
-        if len(subject_frag) < len(RM_seq):
+    # Basic linear counting
+    for i in range(seq_len):
+        subject_frag = dna_seq[i:i+rm_len]
+        subject_frag_RC = dna_seq_RC[i:i+rm_len]
+        if len(subject_frag) < rm_len:
             break
         
-        elif functools.reduce(lambda x, y: x and y,
-                              map(lambda p, q: True if (p == q) else p in ambiguous_dna_values[q],
-                                  list(subject_frag), list(RM_seq)), True):
+        match_forward = functools.reduce(lambda x, y: x and y,
+                                         map(lambda p, q: True if (p == q) else p in ambiguous_dna_values[q],
+                                             list(subject_frag), list(RM_seq)), True)
+        if match_forward:
             identity_score += 1
-            if subject_frag == subject_frag.reverse_complement():
-                palindrome_count[column_name] += 1
+            unique_positions.add(i)
+            print(f"Forward match at {i}: {subject_frag}")
 
-        if functools.reduce(lambda x, y: x and y,
-                            map(lambda p, q: True if (p == q) else p in ambiguous_dna_values[q],
-                                list(subject_frag_RC), list(RM_seq)), True):
+        match_reverse = functools.reduce(lambda x, y: x and y,
+                                         map(lambda p, q: True if (p == q) else p in ambiguous_dna_values[q],
+                                             list(subject_frag_RC), list(RM_seq)), True)
+        if match_reverse:
             identity_score_RC += 1
+            unique_positions.add(i)
+            print(f"Reverse match at {i}: {subject_frag_RC}")
 
-    return identity_score, identity_score_RC, palindrome_count
+        if match_forward and match_reverse:
+            reverse_match_count[column_name] += 1
+
+    # Circular DNA boundary correction
+    if is_circular:
+        for i in range(seq_len - rm_len + 1, seq_len):
+            overlap = seq_len - i
+            subject_frag = dna_seq[i:] + dna_seq[:rm_len - overlap]
+            subject_frag_RC = dna_seq_RC[i:] + dna_seq_RC[:rm_len - overlap]
+
+            match_forward = functools.reduce(lambda x, y: x and y,
+                                             map(lambda p, q: True if (p == q) else p in ambiguous_dna_values[q],
+                                                 list(subject_frag), list(RM_seq)), True)
+            if match_forward and i not in unique_positions:
+                identity_score += 1
+                unique_positions.add(i)
+                print(f"Circular boundary match at {i}: {subject_frag}")
+
+            match_reverse = functools.reduce(lambda x, y: x and y,
+                                             map(lambda p, q: True if (p == q) else p in ambiguous_dna_values[q],
+                                                 list(subject_frag_RC), list(RM_seq)), True)
+            if match_reverse and i not in unique_positions:
+                identity_score_RC += 1
+                unique_positions.add(i)
+                print(f"Circular boundary RC match at {i}: {subject_frag_RC}")
+
+            if match_forward and match_reverse:
+                reverse_match_count[column_name] += 1
+
+    total_unique = len(unique_positions)
+    print(f"Total unique positions for {column_name}: {total_unique}")
+    return identity_score, identity_score_RC, reverse_match_count, total_unique
 
 # Get restriction sequence input from user
 RM_seq_input = input("Enter RM recognition sequences (comma-separated, e.g., GATC, EcoRI): ")
@@ -659,7 +704,6 @@ for root, _, files in os.walk(working_directory):
         if file.endswith(".dna"):
             dna_file_paths.append(os.path.join(root, file))
 
-# Print total number of DNA files found
 print(f"Total DNA files found: {len(dna_file_paths)}")
 
 # Initialize data lists
@@ -668,7 +712,8 @@ dna_names = []
 dna_seq_length = []
 data_F = []
 data_R = []
-palindrome_count_dna = {}
+data_M = []
+reverse_match_count_dna = {}
 skip_list = []
 
 # Process DNA files
@@ -681,21 +726,26 @@ for file_path in dna_file_paths:
         
         forward_seq = Seq(dictionary['seq']).upper()
         current_length = len(forward_seq)
-        print(f"Sequence length: {current_length}")
+        is_circular = dictionary.get('is_circular', False)
+        print(f"{file_path} is {'circular' if is_circular else 'linear'}, Length: {current_length}")
 
         if current_length > 100000:
             print(f"WARNING: Skipping {file_path}: DNA sequence too long (>100,000 bp)")
             skip_list.append((file_path, "Too long"))
             continue
 
-        palindrome_count = {col: 0 for col in column_names}
+        reverse_match_count = {col: 0 for col in column_names}
         data_sub_F = []
         data_sub_R = []
+        data_sub_M = []
         for rm_seq, col_name in zip(RM_seq_list, column_names):
             print(f"Comparing sequence with {rm_seq} ({col_name})")
-            result_F, result_R, palindrome_count = sequence_comparison(forward_seq, rm_seq, col_name, palindrome_count)
+            result_F, result_R, reverse_match_count, total_unique = sequence_comparison(
+                forward_seq, rm_seq, col_name, reverse_match_count, is_circular
+            )
             data_sub_F.append(result_F)
             data_sub_R.append(result_R)
+            data_sub_M.append(total_unique)
 
         current_name = os.path.basename(file_path)[:-4]
         dna_file_paths_processed.append(file_path)
@@ -703,18 +753,10 @@ for file_path in dna_file_paths:
         dna_seq_length.append(current_length)
         data_F.append(data_sub_F)
         data_R.append(data_sub_R)
-        palindrome_count_dna[file_path] = palindrome_count.copy()
+        data_M.append(data_sub_M)
+        reverse_match_count_dna[file_path] = reverse_match_count.copy()
 
-        lengths = {
-            "dna_file_paths_processed": len(dna_file_paths_processed),
-            "dna_names": len(dna_names),
-            "dna_seq_length": len(dna_seq_length),
-            "data_F": len(data_F),
-            "data_R": len(data_R),
-            "palindrome_count_dna": len(palindrome_count_dna)
-        }
-        print(f"Processed {current_name}: {lengths}")
-        print(f"data_F: {data_sub_F}, data_R: {data_sub_R}, palindrome_count: {palindrome_count}")
+        print(f"Processed {current_name}: F={data_sub_F}, R={data_sub_R}, M={data_sub_M}, ReverseMatch={reverse_match_count}")
 
     except Exception as e:
         print(f"WARNING: Error processing {file_path}: {str(e)}")
@@ -724,53 +766,42 @@ for file_path in dna_file_paths:
 
 # Create dataframes for processed files
 if dna_file_paths_processed:
-    print(f"Creating dataframes: dna_file_paths_processed={len(dna_file_paths_processed)}, dna_seq_length={len(dna_seq_length)}, palindrome_count_dna={len(palindrome_count_dna)}")
+    print(f"Creating dataframes with {len(dna_file_paths_processed)} files")
     
-    if len(dna_file_paths_processed) != len(dna_seq_length) or len(dna_file_paths_processed) != len(palindrome_count_dna):
-        raise ValueError(f"Final data mismatch: dna_file_paths_processed={len(dna_file_paths_processed)}, dna_seq_length={len(dna_seq_length)}, palindrome_count_dna={len(palindrome_count_dna)}")
-
     df_F = pd.DataFrame(data_F, index=dna_file_paths_processed, columns=column_names)
     df_R = pd.DataFrame(data_R, index=dna_file_paths_processed, columns=column_names)
-    df_palindrome_count_dna = pd.DataFrame.from_dict(palindrome_count_dna, orient='index', columns=column_names)
-    df_M = df_F.add(df_R, fill_value=0).reindex(df_palindrome_count_dna.index).subtract(df_palindrome_count_dna, fill_value=0)
+    df_M = pd.DataFrame(data_M, index=dna_file_paths_processed, columns=column_names)
+    df_reverse_match = pd.DataFrame.from_dict(reverse_match_count_dna, orient='index', columns=column_names)
 
-    print("df_F sample:")
-    print(df_F.head())
-    print("df_R sample:")
-    print(df_R.head())
-    print("df_palindrome_count_dna sample:")
-    print(df_palindrome_count_dna.head())
-    print("df_M sample:")
-    print(df_M.head())
-
-    for df in [df_F, df_R, df_palindrome_count_dna, df_M]:
+    for df in [df_F, df_R, df_M, df_reverse_match]:
         if 'Length (bp)' not in df.columns:
             df.insert(0, 'Length (bp)', dna_seq_length)
 
     df_F_out = df_F.set_index(pd.Index(dna_names))
     df_R_out = df_R.set_index(pd.Index(dna_names))
-    df_palindrome_count_dna_out = df_palindrome_count_dna.set_index(pd.Index(dna_names))
     df_M_out = df_M.set_index(pd.Index(dna_names))
+    df_reverse_match_out = df_reverse_match.set_index(pd.Index(dna_names))
 
     df_M_out.index.name = 'File Name'
     df_F_out.index.name = 'File Name'
     df_R_out.index.name = 'File Name'
-    df_palindrome_count_dna_out.index.name = 'File Name'
+    df_reverse_match_out.index.name = 'File Name'
 
     sort_columns_with_index = column_names + ['File Name']
     df_M_out = df_M_out.sort_values(by=sort_columns_with_index, ascending=[False] * len(RM_seq_list) + [True])
 
     df_F_out = df_F_out.loc[df_M_out.index]
     df_R_out = df_R_out.loc[df_M_out.index]
-    df_palindrome_count_dna_out = df_palindrome_count_dna_out.loc[df_M_out.index]
+    df_reverse_match_out = df_reverse_match_out.loc[df_M_out.index]
 
     output_file = os.path.join(working_directory, "result.xlsx")
     writer = pd.ExcelWriter(output_file, engine='xlsxwriter')
     
-    df_M_out.to_excel(writer, sheet_name='All count')
+    # Changed sheet name from 'All count' to 'Total count'
+    df_M_out.to_excel(writer, sheet_name='Total count')
     df_F_out.to_excel(writer, sheet_name='Forward Read')
     df_R_out.to_excel(writer, sheet_name='Reverse Read')
-    df_palindrome_count_dna_out.to_excel(writer, sheet_name='Palindrome Count')
+    df_reverse_match_out.to_excel(writer, sheet_name='Reverse Match Count')
     
     writer.close()
     print(f"Results saved to: {output_file}")
@@ -781,11 +812,3 @@ if skip_list:
     print("WARNING: The following files were skipped during processing:")
     for path, error in skip_list:
         print(f"  - File: {path}, Error: {error}")
-
-try:
-    if dna_file_paths_processed and len(dna_file_paths_processed) != len(palindrome_count_dna):
-        raise ValueError("Mismatch detected after processing all files.")
-except Exception as e:
-    print(f"WARNING: Final error occurred: {str(e)}")
-    print(f"Traceback: {traceback.format_exc()}")
-    raise
